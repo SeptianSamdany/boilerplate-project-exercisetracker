@@ -103,12 +103,19 @@ app.get('/api/users/:_id/logs', async (req, res) => {
     // Filter berdasarkan tanggal (from dan to) dengan format yyyy-mm-dd
     if (from || to) {
       filter.date = {};
-      if (from) filter.date.$gte = new Date(from);  // Mengubah from ke Date
-      if (to) filter.date.$lte = new Date(to);      // Mengubah to ke Date
+      if (from) filter.date.$gte = new Date(from).toISOString().split('T')[0]; // Mengubah dari yyyy-mm-dd ke Date
+      if (to) filter.date.$lte = new Date(to).toISOString().split('T')[0];     // Mengubah to ke Date
     }
 
     // Mendapatkan latihan berdasarkan filter dan limit
-    const exercises = await Exercise.find(filter).limit(parseInt(limit) || 0);
+    let query = Exercise.find(filter);
+
+    // Jika ada limit, tambahkan limit pada query
+    if (limit) {
+      query = query.limit(parseInt(limit));
+    }
+
+    const exercises = await query;
 
     // Mengembalikan hasil sebagai JSON
     res.json({
