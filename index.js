@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors());
+app.use(express.static('public'))
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
@@ -96,15 +97,20 @@ app.get('/api/users/:_id/logs', async (req, res) => {
       return res.status(404).json({ error: 'User tidak ditemukan.' });
     }
 
+    // Membuat filter berdasarkan userId
     let filter = { userId: _id };
+
+    // Filter berdasarkan tanggal (from dan to) dengan format yyyy-mm-dd
     if (from || to) {
       filter.date = {};
-      if (from) filter.date.$gte = new Date(from).toDateString();
-      if (to) filter.date.$lte = new Date(to).toDateString();
+      if (from) filter.date.$gte = new Date(from);  // Mengubah from ke Date
+      if (to) filter.date.$lte = new Date(to);      // Mengubah to ke Date
     }
 
+    // Mendapatkan latihan berdasarkan filter dan limit
     const exercises = await Exercise.find(filter).limit(parseInt(limit) || 0);
 
+    // Mengembalikan hasil sebagai JSON
     res.json({
       _id: user._id,
       username: user.username,
@@ -112,10 +118,15 @@ app.get('/api/users/:_id/logs', async (req, res) => {
       log: exercises.map(ex => ({
         description: ex.description,
         duration: ex.duration,
-        date: ex.date
+        date: new Date(ex.date).toDateString() // Memastikan tanggal diformat dengan toDateString
       }))
     });
   } catch (err) {
     res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
   }
 });
+
+
+const listener = app.listen(process.env.PORT || 3000, () => {
+  console.log('Your app is listening on port ' + listener.address().port)
+})
