@@ -1,14 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const bodyParser = require('body-parser');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.static('public'))
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
+app.use(express.static('public'));
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
@@ -19,120 +18,131 @@ mongoose.connect(process.env.MONGO_URI)
   });
 
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true }
-});
-
-const exerciseSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  description: String,
-  duration: Number,
-  date: String
+  username: { type: String, required: true },
+  log: [
+    {
+      description: { type: String, required: true },
+      duration: { type: Number, required: true },
+      date: { type: String, required: true }
+    }
+  ],
+  count: { type: Number, default: 0 }
 });
 
 const User = mongoose.model('User', userSchema);
-const Exercise = mongoose.model('Exercise', exerciseSchema);
 
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html');
 });
 
+// POST to /api/users to create a new user
 app.post('/api/users', async (req, res) => {
+  const { username } = req.body;
   try {
-    const { username } = req.body;
-    const newUser = new User({ username });
-    await newUser.save();
-    res.json({ username: newUser.username, _id: newUser._id });
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+    const user = new User({ username });
+    const data = await user.save();
+    res.json({ username: data.username, _id: data._id });
   } catch (err) {
-    res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
+    res.status(500).json({ error: 'Error creating user' });
   }
 });
 
+// GET all users
 app.get('/api/users', async (req, res) => {
   try {
-    const users = await User.find({}, 'username _id');
+    const users = await User.find({});
     res.json(users);
   } catch (err) {
-    res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
+    res.status(500).json({ error: err.message });
   }
 });
 
+// POST to /api/users/:_id/exercises to add an exercise
 app.post('/api/users/:_id/exercises', async (req, res) => {
-  const { _id } = req.params;
   const { description, duration, date } = req.body;
+  const userId = req.params._id;
+
+  if (!description || !duration) {
+    return res.status(400).json({ error: 'Description and duration are required' });
+  }
+
+  const exerciseDate = date ? new Date(date).toDateString() : new Date().toDateString();
   
+  const exercise = {
+    description,
+    duration: parseInt(duration),
+    date: exerciseDate
+  };
+
   try {
-    const user = await User.findById(_id);
+    const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ error: 'User tidak ditemukan.' });
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    const exerciseDate = date ? new Date(date).toDateString() : new Date().toDateString();
-    const newExercise = new Exercise({
-      userId: _id,
-      description,
-      duration: parseInt(duration),
-      date: exerciseDate
-    });
+    user.log.push(exercise);
+    user.count += 1;
 
-    await newExercise.save();
+    const updatedUser = await user.save();
     res.json({
-      _id: user._id,
-      username: user.username,
-      description: newExercise.description,
-      duration: newExercise.duration,
-      date: newExercise.date
+      _id: updatedUser._id,
+      username: updatedUser.username,
+      description: exercise.description,
+      duration: exercise.duration,
+      date: exercise.date
     });
   } catch (err) {
-    res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
+    res.status(500).json({ error: 'Error adding exercise' });
   }
 });
 
+// GET /api/users/:_id/logs to retrieve the exercise log of a user
 app.get('/api/users/:_id/logs', async (req, res) => {
-  const { _id } = req.params;
   const { from, to, limit } = req.query;
+  const userId = req.params._id;
 
   try {
-    const user = await User.findById(_id);
+    const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ error: 'User tidak ditemukan.' });
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    // Membuat filter berdasarkan userId
-    let filter = { userId: _id };
+    let logs = user.log;
 
-    // Filter berdasarkan tanggal (from dan to) dengan format yyyy-mm-dd
+    // Filter logs by 'from' and 'to' date range
     if (from || to) {
-      filter.date = {};
-      if (from) filter.date.$gte = new Date(from).toISOString().split('T')[0]; // Mengubah dari yyyy-mm-dd ke Date
-      if (to) filter.date.$lte = new Date(to).toISOString().split('T')[0];     // Mengubah to ke Date
+      const fromDate = from ? new Date(from).getTime() : 0;
+      const toDate = to ? new Date(to).getTime() : Date.now();
+
+      logs = logs.filter(log => {
+        const logDate = new Date(log.date).getTime();
+        return logDate >= fromDate && logDate <= toDate;
+      });
     }
 
-    // Mendapatkan latihan berdasarkan filter dan limit
-    let query = Exercise.find(filter);
-
-    // Jika ada limit, tambahkan limit pada query
+    // Limit the number of logs if 'limit' is provided
     if (limit) {
-      query = query.limit(parseInt(limit));
+      logs = logs.slice(0, parseInt(limit));
     }
 
-    const exercises = await query;
-
-    // Mengembalikan hasil sebagai JSON
     res.json({
       _id: user._id,
       username: user.username,
-      count: exercises.length,
-      log: exercises.map(ex => ({
-        description: ex.description,
-        duration: ex.duration,
-        date: new Date(ex.date).toDateString() // Memastikan tanggal diformat dengan toDateString
+      count: logs.length,
+      log: logs.map(log => ({
+        description: log.description,
+        duration: log.duration,
+        date: log.date
       }))
     });
   } catch (err) {
-    res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
+    res.status(500).json({ error: err.message });
   }
 });
 
 const listener = app.listen(process.env.PORT || 3000, () => {
-  console.log('Your app is listening on port ' + listener.address().port)
-})
+  console.log('Your app is listening on port ' + listener.address().port);
+});
